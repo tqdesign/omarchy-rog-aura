@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "tqdesign.rog-aura",
+  "name": "Under glow",
+  "version": "1.0.0",
+  "author": "tqdesign",
+  "license": "MIT",
+  "description": "Pick colours and Aura effects for the lights under a ROG Strix laptop.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Under glow",
+    "description": "ROG lightbar colours and effects",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
