@@ -13,6 +13,7 @@ Panel {
 
   property var status: Model.emptyStatus()
   property var pendingPayload: null
+  property bool lastApplyLive: false
   property bool draggingColour: false
   property bool draggingColour2: false
   property int red: 38
@@ -27,7 +28,8 @@ Panel {
   readonly property var modeInfo: Model.modeByValue(status.mode)
   readonly property var effectChoices: Model.effectOptions(status.supportedModes)
   readonly property var brightnessChoices: Model.brightnessOptions(status.supportedBrightness)
-  readonly property color swatch: Model.cssColor(status.colour)
+  readonly property string liveColour: Model.hexFromRgb(red, green, blue)
+  readonly property color swatch: Model.cssColor(liveColour)
   readonly property color contentForeground: bar ? bar.foreground : Color.foreground
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property color dim: Qt.darker(contentForeground, 1.4)
@@ -70,8 +72,8 @@ Panel {
   }
 
   function runApply(payload) {
-    applyProc.command = auraCommand(["apply", JSON.stringify(payload)])
-    applyProc.running = true
+    root.lastApplyLive = !!(payload && payload.live)
+    applyProc.exec(auraCommand(["apply", JSON.stringify(payload)]))
   }
 
   function enqueueApply(payload) {
@@ -92,13 +94,13 @@ Panel {
     var hex = Model.hexFromRgb(root.red, root.green, root.blue)
     root.hexDraft = hex
     var next = patchStatus({ colour: hex })
-    enqueueApply(Model.effectPayload(next, { colour: hex }))
+    enqueueApply(Model.effectPayload(next, { colour: hex, live: true }))
   }
 
   function setColour2FromRgb() {
     var hex = Model.hexFromRgb(root.red2, root.green2, root.blue2)
     var next = patchStatus({ colour2: hex })
-    enqueueApply(Model.effectPayload(next, { colour2: hex }))
+    enqueueApply(Model.effectPayload(next, { colour2: hex, live: true }))
   }
 
   function setHexColour(text) {
@@ -109,7 +111,7 @@ Panel {
     root.green = rgb.g
     root.blue = rgb.b
     var next = patchStatus({ colour: hex })
-    enqueueApply(Model.effectPayload(next, { colour: hex }))
+    enqueueApply(Model.effectPayload(next, { colour: hex, live: true }))
   }
 
   function setSpeed(value) {
@@ -172,7 +174,17 @@ Panel {
     id: applyProc
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: root.applyStatus(text)
+      onStreamFinished: {
+        if (root.lastApplyLive) {
+          var next = Model.parseStatus(text)
+          if (next.ok && next.available) return
+        }
+        root.applyStatus(text)
+      }
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (String(text || "").trim()) console.warn("tqdesign.rog-aura:", text)
     }
     onExited: {
       if (root.pendingPayload) {
@@ -192,14 +204,14 @@ Panel {
 
   Timer {
     id: colourDebounce
-    interval: 90
+    interval: 40
     repeat: false
     onTriggered: root.setColourFromRgb()
   }
 
   Timer {
     id: colour2Debounce
-    interval: 90
+    interval: 40
     repeat: false
     onTriggered: root.setColour2FromRgb()
   }
@@ -215,6 +227,7 @@ Panel {
     function toggle(): void { root.toggle() }
     function status(): string { return JSON.stringify(root.status) }
     function refresh(): void { root.refresh() }
+    function setColour(hex: string): string { root.setHexColour(hex); return root.liveColour }
     function nextMode(): string { root.cycleMode(); return root.status.mode }
     function toggleLightbar(): string {
       root.toggleZone("lightbar")
@@ -381,6 +394,151 @@ Panel {
 
             PanelSeparator { foreground: root.contentForeground }
 
+            Column {
+              width: parent.width
+              spacing: Style.space(10)
+              visible: root.modeInfo.colour
+
+              PanelSectionHeader {
+                text: root.modeInfo.colour2 ? "COLOUR 1" : "COLOUR"
+                foreground: root.contentForeground
+                fontFamily: root.contentFontFamily
+              }
+
+              Flow {
+                width: parent.width
+                spacing: Style.space(8)
+
+                Repeater {
+                  model: Model.PALETTE
+                  Rectangle {
+                    width: Style.space(28)
+                    height: width
+                    radius: width / 2
+                    color: Model.cssColor(modelData)
+                    border.width: Model.normalizeHex(modelData) === root.liveColour ? 2 : 1
+                    border.color: Model.normalizeHex(modelData) === root.liveColour
+                      ? root.contentForeground
+                      : Qt.rgba(contentForeground.r, contentForeground.g, contentForeground.b, 0.35)
+
+                    MouseArea {
+                      anchors.fill: parent
+                      preventStealing: true
+                      hoverEnabled: true
+                      cursorShape: Qt.PointingHandCursor
+                      onPressed: root.setHexColour(modelData)
+                    }
+                  }
+                }
+              }
+
+              ColourSlider {
+                width: parent.width
+                label: "R"
+                value: root.red
+                fill: "#ff5b5b"
+                bar: root.bar
+                foreground: root.contentForeground
+                fontFamily: root.contentFontFamily
+                onMoved: function(v) { root.draggingColour = true; root.red = v; root.hexDraft = root.liveColour; colourDebounce.restart() }
+                onReleased: function(v) { root.red = v; root.draggingColour = false; root.setColourFromRgb() }
+              }
+              ColourSlider {
+                width: parent.width
+                label: "G"
+                value: root.green
+                fill: "#3ddc84"
+                bar: root.bar
+                foreground: root.contentForeground
+                fontFamily: root.contentFontFamily
+                onMoved: function(v) { root.draggingColour = true; root.green = v; root.hexDraft = root.liveColour; colourDebounce.restart() }
+                onReleased: function(v) { root.green = v; root.draggingColour = false; root.setColourFromRgb() }
+              }
+              ColourSlider {
+                width: parent.width
+                label: "B"
+                value: root.blue
+                fill: "#4aa3ff"
+                bar: root.bar
+                foreground: root.contentForeground
+                fontFamily: root.contentFontFamily
+                onMoved: function(v) { root.draggingColour = true; root.blue = v; root.hexDraft = root.liveColour; colourDebounce.restart() }
+                onReleased: function(v) { root.blue = v; root.draggingColour = false; root.setColourFromRgb() }
+              }
+
+              Row {
+                width: parent.width
+                spacing: Style.space(10)
+
+                Rectangle {
+                  width: Style.space(28)
+                  height: Style.space(28)
+                  radius: Style.cornerRadius
+                  color: root.swatch
+                  border.color: root.contentForeground
+                  border.width: 1
+                  anchors.verticalCenter: parent.verticalCenter
+                }
+
+                TextField {
+                  width: parent.width - Style.space(38)
+                  text: root.hexDraft
+                  foreground: root.contentForeground
+                  font.family: root.contentFontFamily
+                  onEditingFinished: root.setHexColour(text)
+                  onAccepted: root.setHexColour(text)
+                }
+              }
+            }
+
+            Column {
+              width: parent.width
+              spacing: Style.space(10)
+              visible: root.modeInfo.colour2
+
+              PanelSectionHeader {
+                text: "COLOUR 2"
+                foreground: root.contentForeground
+                fontFamily: root.contentFontFamily
+              }
+
+              ColourSlider {
+                width: parent.width
+                label: "R"
+                value: root.red2
+                fill: "#ff5b5b"
+                bar: root.bar
+                foreground: root.contentForeground
+                fontFamily: root.contentFontFamily
+                onMoved: function(v) { root.draggingColour2 = true; root.red2 = v; colour2Debounce.restart() }
+                onReleased: function(v) { root.red2 = v; root.draggingColour2 = false; root.setColour2FromRgb() }
+              }
+              ColourSlider {
+                width: parent.width
+                label: "G"
+                value: root.green2
+                fill: "#3ddc84"
+                bar: root.bar
+                foreground: root.contentForeground
+                fontFamily: root.contentFontFamily
+                onMoved: function(v) { root.draggingColour2 = true; root.green2 = v; colour2Debounce.restart() }
+                onReleased: function(v) { root.green2 = v; root.draggingColour2 = false; root.setColour2FromRgb() }
+              }
+              ColourSlider {
+                width: parent.width
+                label: "B"
+                value: root.blue2
+                fill: "#4aa3ff"
+                bar: root.bar
+                foreground: root.contentForeground
+                fontFamily: root.contentFontFamily
+                onMoved: function(v) { root.draggingColour2 = true; root.blue2 = v; colour2Debounce.restart() }
+                onReleased: function(v) { root.blue2 = v; root.draggingColour2 = false; root.setColour2FromRgb() }
+              }
+            }
+
+            PanelSeparator { foreground: root.contentForeground }
+
             PanelSectionHeader {
               text: "EFFECT"
               foreground: root.contentForeground
@@ -454,149 +612,6 @@ Panel {
                 focusable: false
                 options: Model.DIRECTION_LABELS
                 onChanged: function(v) { root.setDirection(v) }
-              }
-            }
-
-            Column {
-              width: parent.width
-              spacing: Style.space(10)
-              visible: root.modeInfo.colour
-
-              PanelSeparator { foreground: root.contentForeground }
-
-              PanelSectionHeader {
-                text: root.modeInfo.colour2 ? "COLOUR 1" : "COLOUR"
-                foreground: root.contentForeground
-                fontFamily: root.contentFontFamily
-              }
-
-              Flow {
-                width: parent.width
-                spacing: Style.space(8)
-
-                Repeater {
-                  model: Model.PALETTE
-                  Rectangle {
-                    width: Style.space(22)
-                    height: width
-                    radius: width / 2
-                    color: Model.cssColor(modelData)
-                    border.width: Model.normalizeHex(modelData) === root.status.colour ? 2 : 1
-                    border.color: Model.normalizeHex(modelData) === root.status.colour
-                      ? root.contentForeground
-                      : Qt.rgba(contentForeground.r, contentForeground.g, contentForeground.b, 0.35)
-
-                    MouseArea {
-                      anchors.fill: parent
-                      cursorShape: Qt.PointingHandCursor
-                      onClicked: root.setHexColour(modelData)
-                    }
-                  }
-                }
-              }
-
-              ColourSlider {
-                width: parent.width
-                label: "R"
-                value: root.red
-                fill: "#ff5b5b"
-                bar: root.bar
-                foreground: root.contentForeground
-                fontFamily: root.contentFontFamily
-                onMoved: function(v) { root.draggingColour = true; root.red = v; colourDebounce.restart() }
-                onReleased: function(v) { root.red = v; root.draggingColour = false; root.setColourFromRgb() }
-              }
-              ColourSlider {
-                width: parent.width
-                label: "G"
-                value: root.green
-                fill: "#3ddc84"
-                bar: root.bar
-                foreground: root.contentForeground
-                fontFamily: root.contentFontFamily
-                onMoved: function(v) { root.draggingColour = true; root.green = v; colourDebounce.restart() }
-                onReleased: function(v) { root.green = v; root.draggingColour = false; root.setColourFromRgb() }
-              }
-              ColourSlider {
-                width: parent.width
-                label: "B"
-                value: root.blue
-                fill: "#4aa3ff"
-                bar: root.bar
-                foreground: root.contentForeground
-                fontFamily: root.contentFontFamily
-                onMoved: function(v) { root.draggingColour = true; root.blue = v; colourDebounce.restart() }
-                onReleased: function(v) { root.blue = v; root.draggingColour = false; root.setColourFromRgb() }
-              }
-
-              Row {
-                width: parent.width
-                spacing: Style.space(10)
-
-                Rectangle {
-                  width: Style.space(28)
-                  height: Style.space(28)
-                  radius: Style.cornerRadius
-                  color: Model.cssColor(root.hexDraft)
-                  border.color: root.contentForeground
-                  border.width: 1
-                  anchors.verticalCenter: parent.verticalCenter
-                }
-
-                TextField {
-                  width: parent.width - Style.space(38)
-                  text: root.hexDraft
-                  foreground: root.contentForeground
-                  font.family: root.contentFontFamily
-                  onEditingFinished: root.setHexColour(text)
-                  onAccepted: root.setHexColour(text)
-                }
-              }
-            }
-
-            Column {
-              width: parent.width
-              spacing: Style.space(10)
-              visible: root.modeInfo.colour2
-
-              PanelSectionHeader {
-                text: "COLOUR 2"
-                foreground: root.contentForeground
-                fontFamily: root.contentFontFamily
-              }
-
-              ColourSlider {
-                width: parent.width
-                label: "R"
-                value: root.red2
-                fill: "#ff5b5b"
-                bar: root.bar
-                foreground: root.contentForeground
-                fontFamily: root.contentFontFamily
-                onMoved: function(v) { root.draggingColour2 = true; root.red2 = v; colour2Debounce.restart() }
-                onReleased: function(v) { root.red2 = v; root.draggingColour2 = false; root.setColour2FromRgb() }
-              }
-              ColourSlider {
-                width: parent.width
-                label: "G"
-                value: root.green2
-                fill: "#3ddc84"
-                bar: root.bar
-                foreground: root.contentForeground
-                fontFamily: root.contentFontFamily
-                onMoved: function(v) { root.draggingColour2 = true; root.green2 = v; colour2Debounce.restart() }
-                onReleased: function(v) { root.green2 = v; root.draggingColour2 = false; root.setColour2FromRgb() }
-              }
-              ColourSlider {
-                width: parent.width
-                label: "B"
-                value: root.blue2
-                fill: "#4aa3ff"
-                bar: root.bar
-                foreground: root.contentForeground
-                fontFamily: root.contentFontFamily
-                onMoved: function(v) { root.draggingColour2 = true; root.blue2 = v; colour2Debounce.restart() }
-                onReleased: function(v) { root.blue2 = v; root.draggingColour2 = false; root.setColour2FromRgb() }
               }
             }
           }

@@ -82,35 +82,37 @@ class AuraTests(unittest.TestCase):
                 return completed(TREE)
             if argv[0] == "busctl" and "GetAll" in argv:
                 return completed(json.dumps(GETALL))
+            if argv[0] == "busctl" and "set-property" in argv:
+                return completed()
             if argv[0].endswith("asusctl") or argv[0] == "asusctl":
                 return completed()
             return completed(returncode=1, stderr="unexpected")
 
-        # shutil.which still needs a real binary; stub via PATH-independent name
-        # by intercepting run_asusctl through the runner after which() succeeds.
         status = aura.read_status(runner)
         self.assertEqual(status["colour"], "26bbd9")
-
-        original_which = aura.which_or_raise
-        aura.which_or_raise = lambda name: "/usr/bin/asusctl"
-        try:
-            aura.apply_effect({"mode": "breathe", "colour": "ff0000"}, status, runner)
-        finally:
-            aura.which_or_raise = original_which
-        asus = [c for c in calls if c and c[0] == "/usr/bin/asusctl"][-1]
+        aura.apply_effect({"mode": "breathe", "colour": "ff0000"}, status, runner)
+        setp = [c for c in calls if c and c[0] == "busctl" and "set-property" in c][-1]
         self.assertEqual(
-            asus,
+            setp,
             [
-                "/usr/bin/asusctl",
-                "aura",
-                "effect",
-                "breathe",
-                "--colour",
-                "ff0000",
-                "--colour2",
-                "000000",
-                "--speed",
-                "med",
+                "busctl",
+                "set-property",
+                "--system",
+                "xyz.ljones.Asusd",
+                "/xyz/ljones/aura/19b6_2_4",
+                "xyz.ljones.Aura",
+                "LedModeData",
+                "(uu(yyy)(yyy)ss)",
+                "1",
+                "0",
+                "255",
+                "0",
+                "0",
+                "0",
+                "0",
+                "0",
+                "Med",
+                "Right",
             ],
         )
 

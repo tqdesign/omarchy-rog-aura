@@ -1,10 +1,22 @@
 # Under glow
 
-Colours and Aura effects for the lights under a ROG Strix laptop. Talks to
-[asusctl](https://asus-linux.org/) / `asusd`, so it works on this G18 and on
-other ROG machines that expose Aura over D-Bus.
+Colours and Aura effects for the lights under a ROG Strix laptop.
+
+An [Omarchy](https://omarchy.org/) bar plugin that talks to
+[asusctl](https://asus-linux.org/) / `asusd`. Built on a ROG Strix G18; it
+should also work on other ROG machines that expose Aura over D-Bus.
+
+On this hardware the **under glow** (lightbar) and **keyboard** share one
+colour and effect. Each zone can still be turned on or off on its own.
 
 ## Install
+
+```bash
+omarchy plugin add https://github.com/tqdesign/omarchy-rog-aura.git --enable --yes
+omarchy bar move tqdesign.rog-aura --section right
+```
+
+From a local checkout:
 
 ```bash
 omarchy plugin add /path/to/omarchy-rog-aura --enable --yes
@@ -26,20 +38,23 @@ The chip is a live swatch of the current colour.
 
 ## Panel
 
-- **Zones** — independently turn the under glow and keyboard on or off. Colour
-  and effect are shared on this hardware.
-- **Stay on while sleeping** — keep the lightbar lit through sleep.
+- **Zones** — independently turn the under glow and keyboard on or off
+- **Stay on while sleeping** — keep the lightbar lit through sleep
 - **Brightness** — Off / Low / Med / High
+- **Colour** — palette, RGB sliders, and a hex field. The lights follow as
+  you pick. A second colour appears for Breathe and Stars.
 - **Effect** — every Aura mode `asusd` reports (Static, Breathe, Cycle, Wave,
-  Stars, Rain, Highlight, Laser, Ripple, Pulse, Comet, Flash)
-- **Colour** — palette, RGB sliders, and a hex field. A second colour appears
-  for Breathe and Stars. Speed and direction appear when the effect uses them.
+  Stars, Rain, Highlight, Laser, Ripple, Pulse, Comet, Flash). Speed and
+  direction appear when the effect uses them.
+
+Cycle, Wave, and Rain do not take a colour, so those controls hide.
 
 ## Commands
 
 ```bash
 omarchy-shell tqdesign.rog-aura status
 omarchy-shell tqdesign.rog-aura toggle
+omarchy-shell tqdesign.rog-aura setColour ff0066
 omarchy-shell tqdesign.rog-aura nextMode
 omarchy-shell tqdesign.rog-aura toggleLightbar
 ```
@@ -60,3 +75,7 @@ node Model.test.js
 python3 aura_test.py
 omarchy plugin validate .
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).

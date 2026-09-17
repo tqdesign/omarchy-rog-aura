@@ -125,6 +125,11 @@ def parse_hex(value: Any) -> str:
     return "000000"
 
 
+def rgb_from_hex(value: Any) -> tuple[int, int, int]:
+    hex_colour = parse_hex(value)
+    return int(hex_colour[0:2], 16), int(hex_colour[2:4], 16), int(hex_colour[4:6], 16)
+
+
 def lower_token(value: Any, fallback: str) -> str:
     token = str(value or "").strip().lower()
     return token if token else fallback
@@ -308,31 +313,69 @@ def run_asusctl(args: list[str], runner: Callable[..., subprocess.CompletedProce
         raise AuraError(err or "asusctl failed", available=True)
 
 
-def apply_effect(payload: dict[str, Any], current: dict[str, Any], runner: Callable[..., subprocess.CompletedProcess[str]]) -> None:
+def effect_fields(payload: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
     mode = str(payload.get("mode") or current.get("mode") or "static")
     if mode not in EFFECT_ARGS:
         raise AuraError(f"unknown effect '{mode}'", available=True)
-    colour = parse_hex(payload.get("colour") or current.get("colour"))
-    colour2 = parse_hex(payload.get("colour2") or current.get("colour2"))
     speed = lower_token(payload.get("speed") or current.get("speed"), "med")
     if speed not in ("low", "med", "high"):
         speed = "med"
     direction = lower_token(payload.get("direction") or current.get("direction"), "right")
     if direction not in ("left", "right", "up", "down"):
         direction = "right"
-    args = ["aura", "effect", mode]
-    needed = EFFECT_ARGS[mode]
+    return {
+        "mode": mode,
+        "modeId": ID_BY_MODE[mode],
+        "colour": parse_hex(payload.get("colour") or current.get("colour")),
+        "colour2": parse_hex(payload.get("colour2") or current.get("colour2")),
+        "speed": speed,
+        "direction": direction,
+    }
+
+
+def apply_effect(payload: dict[str, Any], current: dict[str, Any], runner: Callable[..., subprocess.CompletedProcess[str]]) -> None:
+    fields = effect_fields(payload, current)
+    path = str(payload.get("path") or current.get("path") or "")
+    if not path:
+        path = find_aura_path(runner)
+    colour = rgb_from_hex(fields["colour"])
+    colour2 = rgb_from_hex(fields["colour2"])
+    argv = [
+        "busctl",
+        "set-property",
+        "--system",
+        BUS,
+        path,
+        AURA_IFACE,
+        "LedModeData",
+        "(uu(yyy)(yyy)ss)",
+        str(fields["modeId"]),
+        "0",
+        str(colour[0]),
+        str(colour[1]),
+        str(colour[2]),
+        str(colour2[0]),
+        str(colour2[1]),
+        str(colour2[2]),
+        fields["speed"].capitalize(),
+        fields["direction"].capitalize(),
+    ]
+    proc = runner(argv)
+    if proc.returncode == 0:
+        return
+    args = ["aura", "effect", fields["mode"]]
+    needed = EFFECT_ARGS[fields["mode"]]
     if "colour" in needed:
-        if mode in ("static", "highlight", "laser", "ripple", "pulse", "comet", "flash"):
-            args.extend(["-c", colour])
+        if fields["mode"] in ("static", "highlight", "laser", "ripple", "pulse", "comet", "flash"):
+            args.extend(["-c", fields["colour"]])
         else:
-            args.extend(["--colour", colour])
+            args.extend(["--colour", fields["colour"]])
     if "colour2" in needed:
-        args.extend(["--colour2", colour2])
+        args.extend(["--colour2", fields["colour2"]])
     if "speed" in needed:
-        args.extend(["--speed", speed])
+        args.extend(["--speed", fields["speed"]])
     if "direction" in needed:
-        args.extend(["--direction", direction])
+        args.extend(["--direction", fields["direction"]])
     run_asusctl(args, runner)
 
 
@@ -355,10 +398,19 @@ def apply_brightness(payload: dict[str, Any], runner: Callable[..., subprocess.C
 
 
 def apply_payload(payload: dict[str, Any], runner: Callable[..., subprocess.CompletedProcess[str]] = run_command) -> dict[str, Any]:
-    current = read_status(runner)
+    live = payload.get("live") is True
+    current = payload if payload.get("path") else read_status(runner)
     action = str(payload.get("action") or "effect")
     if action == "effect":
         apply_effect(payload, current, runner)
+        if live:
+            fields = effect_fields(payload, current)
+            result = dict(current)
+            result.update(fields)
+            result["ok"] = True
+            result["available"] = True
+            result["error"] = None
+            return result
     elif action == "power":
         apply_power(payload, runner)
     elif action == "brightness":

@@ -256,6 +256,8 @@ function effectPayload(status, changes) {
   var next = changes || {}
   return {
     action: "effect",
+    live: next.live === true,
+    path: (next.path || (status && status.path) || ""),
     mode: next.mode || (status && status.mode) || "static",
     colour: normalizeHex(next.colour || (status && status.colour)),
     colour2: normalizeHex(next.colour2 || (status && status.colour2)),
