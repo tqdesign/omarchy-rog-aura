@@ -19,7 +19,7 @@ Item {
 
   Process {
     id: watchProc
-    command: ["python3", "-u", root.auraScript, "watch-lid", "--apply"]
+    command: ["python3", "-u", root.auraScript, "daemon"]
     stdout: SplitParser {
       onRead: function(line) {
         try {

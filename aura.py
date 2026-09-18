@@ -10,7 +10,9 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import math
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -392,8 +394,6 @@ def apply_effect(payload: dict[str, Any], current: dict[str, Any], runner: Calla
         fields["direction"].capitalize(),
     ]
     proc = runner(argv)
-    if proc.returncode == 0:
-        return
     args = ["aura", "effect", fields["mode"]]
     needed = EFFECT_ARGS[fields["mode"]]
     if "colour" in needed:
@@ -407,7 +407,12 @@ def apply_effect(payload: dict[str, Any], current: dict[str, Any], runner: Calla
         args.extend(["--speed", fields["speed"]])
     if "direction" in needed:
         args.extend(["--direction", fields["direction"]])
-    run_asusctl(args, runner)
+    try:
+        run_asusctl(args, runner)
+    except AuraError:
+        if proc.returncode != 0:
+            raise
+    save_fx_state(fields, active=not lid_closed())
 
 
 def apply_power(payload: dict[str, Any], runner: Callable[..., subprocess.CompletedProcess[str]]) -> None:
@@ -458,6 +463,9 @@ def apply_lid(closed: bool, runner: Callable[..., subprocess.CompletedProcess[st
     if closed:
         if load_lid_snapshot() is None:
             save_lid_snapshot(zones)
+        fx = load_fx_state()
+        if fx:
+            save_fx_state(fx, active=False)
         for zone in zones:
             name = str(zone.get("name") or "")
             if name:
@@ -481,10 +489,185 @@ def apply_lid(closed: bool, runner: Callable[..., subprocess.CompletedProcess[st
                 },
                 runner,
             )
+        fx = load_fx_state()
+        if fx:
+            save_fx_state(fx, active=True)
         clear_lid_snapshot()
     result = read_status(runner)
     result["lidClosed"] = closed
     return result
+
+
+def fx_path() -> Path:
+    override = os.environ.get("OMARCHY_ROG_AURA_FX")
+    if override:
+        return Path(override)
+    return Path.home() / ".local/state/omarchy/rog-aura-fx.json"
+
+
+def save_fx_state(fields: dict[str, Any], active: bool = True) -> None:
+    path = fx_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "mode": fields.get("mode") or "static",
+                "colour": parse_hex(fields.get("colour")),
+                "colour2": parse_hex(fields.get("colour2")),
+                "speed": fields.get("speed") or "med",
+                "direction": fields.get("direction") or "right",
+                "active": active is True,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def load_fx_state() -> dict[str, Any] | None:
+    path = fx_path()
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def hsv_to_rgb(h: float, s: float, v: float) -> tuple[int, int, int]:
+    h = h % 360.0
+    c = v * s
+    x = c * (1 - abs((h / 60.0) % 2 - 1))
+    m = v - c
+    if h < 60:
+        r, g, b = c, x, 0.0
+    elif h < 120:
+        r, g, b = x, c, 0.0
+    elif h < 180:
+        r, g, b = 0.0, c, x
+    elif h < 240:
+        r, g, b = 0.0, x, c
+    elif h < 300:
+        r, g, b = x, 0.0, c
+    else:
+        r, g, b = c, 0.0, x
+    return int((r + m) * 255), int((g + m) * 255), int((b + m) * 255)
+
+
+def lerp_rgb(a: tuple[int, int, int], b: tuple[int, int, int], t: float) -> tuple[int, int, int]:
+    t = max(0.0, min(1.0, t))
+    return (
+        int(a[0] + (b[0] - a[0]) * t),
+        int(a[1] + (b[1] - a[1]) * t),
+        int(a[2] + (b[2] - a[2]) * t),
+    )
+
+
+def lightbar_frame(fx: dict[str, Any], tick: int) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
+    mode = str(fx.get("mode") or "static")
+    colour = rgb_from_hex(fx.get("colour"))
+    colour2 = rgb_from_hex(fx.get("colour2"))
+    direction = str(fx.get("direction") or "right")
+    if mode == "rainbow-cycle":
+        rgb = hsv_to_rgb(tick * 8, 1.0, 1.0)
+        return rgb, rgb
+    if mode == "rainbow-wave":
+        offset = -90 if direction in ("left", "down") else 90
+        return hsv_to_rgb(tick * 8, 1.0, 1.0), hsv_to_rgb(tick * 8 + offset, 1.0, 1.0)
+    if mode == "breathe":
+        phase = (math.sin(tick * 0.12) + 1) / 2
+        rgb = lerp_rgb(colour, colour2 if colour2 != (0, 0, 0) else (0, 0, 0), phase)
+        return rgb, rgb
+    if mode == "stars":
+        left = colour if random.random() > 0.45 else colour2
+        right = colour if random.random() > 0.45 else colour2
+        return left, right
+    if mode in ("pulse", "flash"):
+        on = (tick // 4) % 2 == 0
+        rgb = colour if on else (0, 0, 0)
+        return rgb, rgb
+    if mode in ("rain", "comet"):
+        phase = (tick % 20) / 20.0
+        return lerp_rgb(colour2, colour, phase), lerp_rgb(colour, colour2, phase)
+    if mode in ("highlight", "laser", "ripple"):
+        phase = abs(((tick * 0.15) % 2) - 1)
+        rgb = lerp_rgb((0, 0, 0), colour, phase)
+        return rgb, rgb
+    return colour, colour
+
+
+def write_lightbar_colour(
+    path: str,
+    zone: int,
+    rgb: tuple[int, int, int],
+    runner: Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
+    pkt = [0] * 64
+    pkt[0] = 0x5D
+    pkt[1] = 0xB3
+    pkt[2] = zone
+    pkt[3] = 0
+    pkt[4], pkt[5], pkt[6] = rgb
+    pkt[7] = 0xEB
+    argv = [
+        "busctl",
+        "call",
+        "--system",
+        BUS,
+        path,
+        AURA_IFACE,
+        "DirectAddressingRaw",
+        "aay",
+        "1",
+        "64",
+        *[str(b) for b in pkt],
+    ]
+    runner(argv)
+
+
+def fx_interval(speed: str) -> float:
+    if speed == "high":
+        return 0.04
+    if speed == "low":
+        return 0.16
+    return 0.08
+
+
+def daemon(runner: Callable[..., subprocess.CompletedProcess[str]] = run_command) -> int:
+    last_lid: bool | None = None
+    tick = 0
+    path = ""
+    if load_fx_state() is None:
+        try:
+            save_fx_state(read_status(runner), active=not lid_closed())
+        except AuraError:
+            pass
+    while True:
+        closed = lid_closed()
+        if closed != last_lid:
+            last_lid = closed
+            result = apply_lid(closed, runner)
+            result["closed"] = closed
+            emit(result)
+            fx = load_fx_state() or {}
+            if fx:
+                save_fx_state(fx, active=not closed)
+        if not closed:
+            fx = load_fx_state()
+            if fx and fx.get("active") is not False and str(fx.get("mode") or "static") != "static":
+                if not path:
+                    try:
+                        path = find_aura_path(runner)
+                    except AuraError:
+                        path = ""
+                if path:
+                    left, right = lightbar_frame(fx, tick)
+                    write_lightbar_colour(path, 6, left, runner)
+                    write_lightbar_colour(path, 7, right, runner)
+                    tick += 1
+                time.sleep(fx_interval(str(fx.get("speed") or "med")))
+                continue
+        time.sleep(0.2)
 
 
 def watch_lid(apply: bool = False, runner: Callable[..., subprocess.CompletedProcess[str]] = run_command) -> int:
@@ -556,6 +739,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("lid", help="print whether the laptop lid is closed")
     watch_cmd = sub.add_parser("watch-lid", help="emit JSON whenever the lid opens or closes")
     watch_cmd.add_argument("--apply", action="store_true", help="turn Aura off while the lid is closed")
+    sub.add_parser("daemon", help="watch the lid and animate the under-glow for Aura effects")
     apply_cmd = sub.add_parser("apply", help="apply an effect, power, or brightness change")
     apply_cmd.add_argument("payload", nargs="?", help="JSON object")
     apply_cmd.add_argument("--file", dest="payload_file", help="read JSON from a file")
@@ -568,6 +752,8 @@ def main(argv: list[str] | None = None) -> int:
             return emit({"ok": True, "closed": closed, "lidClosed": closed})
         if args.command == "watch-lid":
             return watch_lid(apply=args.apply)
+        if args.command == "daemon":
+            return daemon()
         payload = load_payload(args.payload, args.payload_file)
         return emit(apply_payload(payload))
     except AuraError as exc:

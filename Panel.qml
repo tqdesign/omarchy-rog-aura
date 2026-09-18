@@ -551,6 +551,15 @@ Panel {
               fontFamily: root.contentFontFamily
             }
 
+            Text {
+              width: parent.width
+              wrapMode: Text.WordWrap
+              text: "Cycle, Wave, Stars, and the rest are driven on the under glow. Keyboard still uses the factory Aura mode."
+              color: root.dim
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
+
             Grid {
               id: effectGrid
               width: parent.width
@@ -568,6 +577,7 @@ Panel {
                   fontFamily: root.contentFontFamily
                   fontSize: Style.font.bodySmall
                   horizontalPadding: Style.space(8)
+                  onPressed: function() { root.setMode(modelData.value) }
                   onClicked: root.setMode(modelData.value)
                 }
               }

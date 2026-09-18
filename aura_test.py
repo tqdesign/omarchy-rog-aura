@@ -92,7 +92,10 @@ class AuraTests(unittest.TestCase):
 
         status = aura.read_status(runner)
         self.assertEqual(status["colour"], "26bbd9")
-        aura.apply_effect({"mode": "breathe", "colour": "ff0000"}, status, runner)
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["OMARCHY_ROG_AURA_FX"] = str(Path(tmp) / "fx.json")
+            self.addCleanup(lambda: os.environ.pop("OMARCHY_ROG_AURA_FX", None))
+            aura.apply_effect({"mode": "breathe", "colour": "ff0000"}, status, runner)
         setp = [c for c in calls if c and c[0] == "busctl" and "set-property" in c][-1]
         self.assertEqual(
             setp,
@@ -132,6 +135,8 @@ class AuraTests(unittest.TestCase):
             lid.write_text("state:      closed\n")
             os.environ["OMARCHY_ROG_AURA_LID"] = str(lid)
             os.environ["OMARCHY_ROG_AURA_STATE"] = str(state)
+            os.environ["OMARCHY_ROG_AURA_FX"] = str(Path(tmp) / "fx.json")
+            self.addCleanup(lambda: os.environ.pop("OMARCHY_ROG_AURA_FX", None))
             self.addCleanup(lambda: os.environ.pop("OMARCHY_ROG_AURA_LID", None))
             self.addCleanup(lambda: os.environ.pop("OMARCHY_ROG_AURA_STATE", None))
             self.assertTrue(aura.lid_closed())
@@ -176,6 +181,20 @@ class AuraTests(unittest.TestCase):
                 self.assertFalse(opened["lidClosed"])
             finally:
                 aura.which_or_raise = original_which
+
+    def test_lightbar_frames(self):
+        self.assertEqual(aura.hsv_to_rgb(0, 1, 1), (255, 0, 0))
+        self.assertEqual(aura.hsv_to_rgb(120, 1, 1), (0, 255, 0))
+        wave = aura.lightbar_frame(
+            {"mode": "rainbow-wave", "colour": "ff0000", "colour2": "000000", "direction": "right"},
+            0,
+        )
+        self.assertNotEqual(wave[0], wave[1])
+        stars = aura.lightbar_frame(
+            {"mode": "stars", "colour": "ff0000", "colour2": "00ff00"},
+            3,
+        )
+        self.assertIn(stars[0], ((255, 0, 0), (0, 255, 0)))
 
 
 if __name__ == "__main__":

@@ -48,7 +48,9 @@ The chip is a live swatch of the current colour.
   you pick. A second colour appears for Breathe and Stars.
 - **Effect** — every Aura mode `asusd` reports (Static, Breathe, Cycle, Wave,
   Stars, Rain, Highlight, Laser, Ripple, Pulse, Comet, Flash). Speed and
-  direction appear when the effect uses them.
+  direction appear when the effect uses them. Animated modes are also driven
+  on the under-glow lightbar (the factory firmware often only animates the
+  keyboard).
 
 Cycle, Wave, and Rain do not take a colour, so those controls hide.
 
