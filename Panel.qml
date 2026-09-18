@@ -33,7 +33,13 @@ Panel {
   readonly property color contentForeground: bar ? bar.foreground : Color.foreground
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property color dim: Qt.darker(contentForeground, 1.4)
-  readonly property bool glowing: Model.isGlowing(status)
+  readonly property var service: {
+    if (bar && bar.shell && typeof bar.shell.serviceFor === "function")
+      return bar.shell.serviceFor("tqdesign.rog-aura")
+    return null
+  }
+  readonly property bool lidClosed: (service && service.lidClosed === true) || status.lidClosed === true
+  readonly property bool glowing: Model.isGlowing(status) && !root.lidClosed
   readonly property var lightbar: Model.zoneByName(status, "lightbar")
   readonly property real chipWidth: Math.max(80, Math.floor((bodyColumn.width - Style.space(16)) / 3))
 
@@ -312,7 +318,7 @@ Panel {
             foreground: root.contentForeground
             fontFamily: root.contentFontFamily
             title: Model.heroTitle(root.status)
-            detail: Model.heroDetail(root.status)
+            detail: root.lidClosed ? "Lid closed" : Model.heroDetail(root.status)
             iconComponent: laptopGlow
           }
 

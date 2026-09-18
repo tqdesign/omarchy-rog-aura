@@ -8,11 +8,15 @@ No extra Python D-Bus packages are required.
 from __future__ import annotations
 
 import argparse
+import glob
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
+import time
+from pathlib import Path
 from typing import Any, Callable
 
 BUS = "xyz.ljones.Asusd"
@@ -76,6 +80,31 @@ EFFECT_ARGS = {
 
 POWER_FLAGS = ("boot", "awake", "sleep", "shutdown")
 AURA_PATH_RE = re.compile(r"/xyz/ljones/aura/[A-Za-z0-9_]+")
+LID_POLL_SECONDS = 0.25
+
+
+def state_path() -> Path:
+    override = os.environ.get("OMARCHY_ROG_AURA_STATE")
+    if override:
+        return Path(override)
+    return Path.home() / ".local/state/omarchy/rog-aura-lid.json"
+
+
+def lid_state_paths() -> list[str]:
+    override = os.environ.get("OMARCHY_ROG_AURA_LID")
+    if override:
+        return [override]
+    return glob.glob("/proc/acpi/button/lid/*/state")
+
+
+def lid_closed() -> bool:
+    for path in lid_state_paths():
+        try:
+            if "closed" in Path(path).read_text():
+                return True
+        except OSError:
+            continue
+    return False
 
 
 class AuraError(Exception):
@@ -265,6 +294,7 @@ def parse_status(props: dict[str, Any], path: str) -> dict[str, Any]:
         "brightnessId": brightness_id,
         "supportedBrightness": supported_brightness or list(BRIGHTNESS_BY_ID.values()),
         "zones": zones,
+        "lidClosed": lid_closed(),
         "error": None,
     }
 
@@ -285,6 +315,7 @@ def unavailable(message: str) -> dict[str, Any]:
         "brightnessId": 0,
         "supportedBrightness": list(BRIGHTNESS_BY_ID.values()),
         "zones": [],
+        "lidClosed": False,
         "error": message,
     }
 
@@ -397,10 +428,86 @@ def apply_brightness(payload: dict[str, Any], runner: Callable[..., subprocess.C
     run_asusctl(["leds", "set", value], runner)
 
 
+def load_lid_snapshot() -> dict[str, Any] | None:
+    path = state_path()
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def save_lid_snapshot(zones: list[Any]) -> None:
+    path = state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"zones": zones}), encoding="utf-8")
+
+
+def clear_lid_snapshot() -> None:
+    try:
+        state_path().unlink()
+    except FileNotFoundError:
+        pass
+
+
+def apply_lid(closed: bool, runner: Callable[..., subprocess.CompletedProcess[str]] = run_command) -> dict[str, Any]:
+    current = read_status(runner)
+    zones = current.get("zones") if isinstance(current.get("zones"), list) else []
+    if closed:
+        if load_lid_snapshot() is None:
+            save_lid_snapshot(zones)
+        for zone in zones:
+            name = str(zone.get("name") or "")
+            if name:
+                apply_power({"zone": name}, runner)
+    else:
+        saved = load_lid_snapshot()
+        saved_zones = saved.get("zones") if saved and isinstance(saved.get("zones"), list) else []
+        for zone in saved_zones:
+            if not isinstance(zone, dict):
+                continue
+            name = str(zone.get("name") or "")
+            if not name:
+                continue
+            apply_power(
+                {
+                    "zone": name,
+                    "boot": zone.get("boot"),
+                    "awake": zone.get("awake"),
+                    "sleep": zone.get("sleep"),
+                    "shutdown": zone.get("shutdown"),
+                },
+                runner,
+            )
+        clear_lid_snapshot()
+    result = read_status(runner)
+    result["lidClosed"] = closed
+    return result
+
+
+def watch_lid(apply: bool = False, runner: Callable[..., subprocess.CompletedProcess[str]] = run_command) -> int:
+    last: bool | None = None
+    while True:
+        closed = lid_closed()
+        if closed != last:
+            last = closed
+            if apply:
+                result = apply_lid(closed, runner)
+            else:
+                result = {"ok": True, "closed": closed}
+            result["closed"] = closed
+            emit(result)
+        time.sleep(LID_POLL_SECONDS)
+
+
 def apply_payload(payload: dict[str, Any], runner: Callable[..., subprocess.CompletedProcess[str]] = run_command) -> dict[str, Any]:
     live = payload.get("live") is True
     current = payload if payload.get("path") else read_status(runner)
     action = str(payload.get("action") or "effect")
+    if action == "lid":
+        return apply_lid(payload.get("closed") is True, runner)
     if action == "effect":
         apply_effect(payload, current, runner)
         if live:
@@ -409,7 +516,10 @@ def apply_payload(payload: dict[str, Any], runner: Callable[..., subprocess.Comp
             result.update(fields)
             result["ok"] = True
             result["available"] = True
+            result["lidClosed"] = lid_closed()
             result["error"] = None
+            if result["lidClosed"]:
+                return apply_lid(True, runner)
             return result
     elif action == "power":
         apply_power(payload, runner)
@@ -417,6 +527,8 @@ def apply_payload(payload: dict[str, Any], runner: Callable[..., subprocess.Comp
         apply_brightness(payload, runner)
     else:
         raise AuraError(f"unknown action '{action}'", available=True)
+    if lid_closed():
+        return apply_lid(True, runner)
     return read_status(runner)
 
 
@@ -441,6 +553,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="ROG Aura helper for the Omarchy plugin")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("status", help="print current Aura state as JSON")
+    sub.add_parser("lid", help="print whether the laptop lid is closed")
+    watch_cmd = sub.add_parser("watch-lid", help="emit JSON whenever the lid opens or closes")
+    watch_cmd.add_argument("--apply", action="store_true", help="turn Aura off while the lid is closed")
     apply_cmd = sub.add_parser("apply", help="apply an effect, power, or brightness change")
     apply_cmd.add_argument("payload", nargs="?", help="JSON object")
     apply_cmd.add_argument("--file", dest="payload_file", help="read JSON from a file")
@@ -448,6 +563,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "status":
             return emit(read_status())
+        if args.command == "lid":
+            closed = lid_closed()
+            return emit({"ok": True, "closed": closed, "lidClosed": closed})
+        if args.command == "watch-lid":
+            return watch_lid(apply=args.apply)
         payload = load_payload(args.payload, args.payload_file)
         return emit(apply_payload(payload))
     except AuraError as exc:

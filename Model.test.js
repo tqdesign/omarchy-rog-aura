@@ -38,6 +38,12 @@ offBar.zones[1].awake = false
 assert.strictEqual(Model.isGlowing(offBar), false)
 assert.strictEqual(Model.heroDetail(offBar), "Under glow is off")
 
+const lidShut = JSON.parse(JSON.stringify(sample))
+lidShut.lidClosed = true
+assert.strictEqual(Model.parseStatus(JSON.stringify(lidShut)).lidClosed, true)
+assert.strictEqual(Model.isGlowing(lidShut), false)
+assert.strictEqual(Model.heroDetail(lidShut), "Lid closed")
+
 assert.strictEqual(Model.normalizeHex("#F0A"), "ff00aa")
 assert.strictEqual(Model.hexFromRgb(38, 187, 217), "26bbd9")
 assert.deepStrictEqual(Model.rgbFromHex("26bbd9"), { r: 38, g: 187, b: 217 })

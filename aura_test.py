@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import json
-import subprocess
+import os
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
 import aura
@@ -122,6 +124,58 @@ class AuraTests(unittest.TestCase):
 
         with self.assertRaises(aura.AuraError):
             aura.find_aura_path(runner)
+
+    def test_lid_closed_and_restore(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lid = Path(tmp) / "lid"
+            state = Path(tmp) / "snap.json"
+            lid.write_text("state:      closed\n")
+            os.environ["OMARCHY_ROG_AURA_LID"] = str(lid)
+            os.environ["OMARCHY_ROG_AURA_STATE"] = str(state)
+            self.addCleanup(lambda: os.environ.pop("OMARCHY_ROG_AURA_LID", None))
+            self.addCleanup(lambda: os.environ.pop("OMARCHY_ROG_AURA_STATE", None))
+            self.assertTrue(aura.lid_closed())
+            lid.write_text("state:      open\n")
+            self.assertFalse(aura.lid_closed())
+
+            calls = []
+
+            def runner(argv):
+                calls.append(argv)
+                if argv[:2] == ["busctl", "tree"]:
+                    return completed(TREE)
+                if argv[0] == "busctl" and "GetAll" in argv:
+                    return completed(json.dumps(GETALL))
+                if argv[0] == "busctl" and "set-property" in argv:
+                    return completed()
+                if argv[0].endswith("asusctl") or argv[0] == "asusctl":
+                    return completed()
+                return completed(returncode=1, stderr="unexpected")
+
+            original_which = aura.which_or_raise
+            aura.which_or_raise = lambda name: "/usr/bin/asusctl"
+            try:
+                closed = aura.apply_lid(True, runner)
+                self.assertTrue(state.is_file())
+                self.assertTrue(closed["lidClosed"])
+                power = [c for c in calls if c[:3] == ["/usr/bin/asusctl", "aura", "power"]]
+                self.assertEqual(power[0], ["/usr/bin/asusctl", "aura", "power", "keyboard"])
+                self.assertEqual(power[1], ["/usr/bin/asusctl", "aura", "power", "lightbar"])
+                calls.clear()
+                opened = aura.apply_lid(False, runner)
+                self.assertFalse(state.is_file())
+                restored = [c for c in calls if c[:3] == ["/usr/bin/asusctl", "aura", "power"]]
+                self.assertEqual(
+                    restored[0],
+                    ["/usr/bin/asusctl", "aura", "power", "keyboard", "--boot", "--awake", "--sleep", "--shutdown"],
+                )
+                self.assertEqual(
+                    restored[1],
+                    ["/usr/bin/asusctl", "aura", "power", "lightbar", "--boot", "--awake"],
+                )
+                self.assertFalse(opened["lidClosed"])
+            finally:
+                aura.which_or_raise = original_which
 
 
 if __name__ == "__main__":

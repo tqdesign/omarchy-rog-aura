@@ -8,6 +8,8 @@ should also work on other ROG machines that expose Aura over D-Bus.
 
 On this hardware the **under glow** (lightbar) and **keyboard** share one
 colour and effect. Each zone can still be turned on or off on its own.
+Closing the lid turns the lights off (including clamshell mode with an
+external monitor) and restores them when you open it.
 
 ## Install
 
@@ -39,7 +41,8 @@ The chip is a live swatch of the current colour.
 ## Panel
 
 - **Zones** — independently turn the under glow and keyboard on or off
-- **Stay on while sleeping** — keep the lightbar lit through sleep
+- **Stay on while sleeping** — keep the lightbar lit through suspend. Closing
+  the lid always turns the lights off.
 - **Brightness** — Off / Low / Med / High
 - **Colour** — palette, RGB sliders, and a hex field. The lights follow as
   you pick. A second colour appears for Breathe and Stars.

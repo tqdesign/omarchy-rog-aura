@@ -62,6 +62,7 @@ function emptyStatus() {
     brightnessId: 0,
     supportedBrightness: ["off", "low", "med", "high"],
     zones: [],
+    lidClosed: false,
     error: ""
   }
 }
@@ -99,6 +100,7 @@ function parseStatus(raw) {
   next.brightnessId = clampInt(parsed.brightnessId, 0, 3, 0)
   next.supportedBrightness = filterKnown(parsed.supportedBrightness, ["off", "low", "med", "high"])
   next.zones = parseZones(parsed.zones)
+  next.lidClosed = parsed.lidClosed === true || parsed.closed === true
   next.error = typeof parsed.error === "string" && parsed.error ? parsed.error : (next.available ? "" : "Aura lighting is not available")
   return next
 }
@@ -223,6 +225,7 @@ function primaryZone(status) {
 
 function isGlowing(status) {
   if (!status || status.available !== true) return false
+  if (status.lidClosed) return false
   if (status.brightness === "off") return false
   var zone = primaryZone(status)
   if (zone) return zone.awake === true
@@ -236,6 +239,7 @@ function heroTitle(status) {
 
 function heroDetail(status) {
   if (!status || status.available !== true) return status && status.error ? status.error : "No Aura device"
+  if (status.lidClosed) return "Lid closed"
   if (status.brightness === "off") return "Brightness off"
   var zone = primaryZone(status)
   if (zone && !zone.awake) return zone.label + " is off"
