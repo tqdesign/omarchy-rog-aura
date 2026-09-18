@@ -577,7 +577,6 @@ Panel {
                   fontFamily: root.contentFontFamily
                   fontSize: Style.font.bodySmall
                   horizontalPadding: Style.space(8)
-                  onPressed: function() { root.setMode(modelData.value) }
                   onClicked: root.setMode(modelData.value)
                 }
               }
