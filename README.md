@@ -6,17 +6,14 @@ An [Omarchy](https://omarchy.org/) bar plugin that talks to
 [asusctl](https://asus-linux.org/) / `asusd`. Built on a ROG Strix G18; it
 should also work on other ROG machines that expose Aura over D-Bus.
 
-On this hardware the **under glow** (lightbar) and **keyboard** share one
-colour and effect. Each zone can still be turned on or off on its own.
-Closing the lid turns the lights off (including clamshell mode with an
-external monitor) and restores them when you open it.
-
 ## Install
 
 ```bash
 omarchy plugin add https://github.com/tqdesign/omarchy-rog-aura.git --enable --yes
 omarchy bar move tqdesign.rog-aura --section right
 ```
+
+The chip is a colour circle on the **right** of the bar, next to Power.
 
 From a local checkout:
 
@@ -26,6 +23,28 @@ omarchy bar move tqdesign.rog-aura --section right
 ```
 
 Needs `asusctl` (already installed on Omarchy ROG machines).
+
+Already installed? Pull the latest:
+
+```bash
+omarchy plugin update tqdesign.rog-aura --yes
+omarchy restart shell
+```
+
+## What it does
+
+- Live colour picker for the under-glow (lightbar). Palette, RGB sliders, or hex.
+- Factory Aura effects (Static, Breathe, Cycle, Wave, Stars, Rain, Highlight,
+  Laser, Ripple, Pulse, Comet, Flash). Speed and direction when the effect
+  uses them.
+- Animated modes are also driven on the **under glow**. The factory firmware
+  often only animates the keyboard; the plugin paints the lightbar itself.
+- Keyboard and under glow share colour and effect, and can be turned on or
+  off independently.
+- Closing the lid turns the lights off, including clamshell mode with an
+  external monitor. Opening the lid restores the previous on/off state.
+
+Cycle, Wave, and Rain do not take a picked colour, so those controls hide.
 
 ## Bar
 
@@ -46,13 +65,8 @@ The chip is a live swatch of the current colour.
 - **Brightness** — Off / Low / Med / High
 - **Colour** — palette, RGB sliders, and a hex field. The lights follow as
   you pick. A second colour appears for Breathe and Stars.
-- **Effect** — every Aura mode `asusd` reports (Static, Breathe, Cycle, Wave,
-  Stars, Rain, Highlight, Laser, Ripple, Pulse, Comet, Flash). Speed and
-  direction appear when the effect uses them. Animated modes are also driven
-  on the under-glow lightbar (the factory firmware often only animates the
-  keyboard).
-
-Cycle, Wave, and Rain do not take a colour, so those controls hide.
+- **Effect** — every Aura mode `asusd` reports. Speed and direction appear
+  when the effect uses them.
 
 ## Commands
 
@@ -69,8 +83,10 @@ The helper the panel uses:
 ```bash
 python3 aura.py status
 python3 aura.py apply '{"action":"effect","mode":"static","colour":"ff0066"}'
+python3 aura.py apply '{"action":"effect","mode":"rainbow-wave","speed":"high","direction":"right"}'
 python3 aura.py apply '{"action":"power","zone":"lightbar","awake":true,"boot":true}'
 python3 aura.py apply '{"action":"brightness","value":"high"}'
+python3 aura.py lid
 ```
 
 ## Tests
